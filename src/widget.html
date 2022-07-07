@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>          
+    <script src="lib/chart.min.js"></script>
+    <script src="lib/VSS.SDK.min.js"></script>
+    <script>
+        VSS.init({
+            explicitNotifyLoaded: true,
+            usePlatformStyles: true
+        });
+
+        VSS.require([
+            "TFS/Dashboards/WidgetHelpers",
+            "VSS/Service",
+            "TFS/WorkItemTracking/RestClient"
+        ], 
+        function (WidgetHelpers, VSSService, TFSWorkItemTrackingRestClient) {
+            WidgetHelpers.IncludeWidgetStyles();
+            
+            VSS.register("Widget", function () {                
+                return {
+                    load: function (WidgetSettings) {
+                        var witClient = VSSService.getCollectionClient(TFSWorkItemTrackingRestClient.WorkItemTrackingHttpClient);
+                        var projectId = VSS.getWebContext().project.id;
+
+                        var date = new Date();
+                        date.setDate(date.getDate() - 365);
+        
+                        var dateFilter = date.toISOString().split('T')[0] + 'T00:00:00.0000000';
+                        var query = 
+                            "SELECT [System.Id] " +
+                            "FROM WorkItems " +
+                            "WHERE [System.CreatedDate] >= '" + dateFilter + "' " +
+                            "ORDER BY [ID]";
+
+                        var workItemTypes = witClient.queryByWiql({ query: query }, projectId).then((result) => {
+                            var workItemIds = result.workItems.map(r => r.id);
+                            var fields = ['System.WorkItemType'];
+
+                            witClient.getWorkItems(workItemIds, fields).then((workItems) => {
+                                var workItemTypes = workItems.reduce((groups, item) => {
+                                    var index = groups.findIndex(group => group.key == item.fields['System.WorkItemType']);
+
+                                    if (index == -1) {
+                                        groups.push({ key: item.fields['System.WorkItemType'], items: [] });
+                                        index = groups.length - 1;
+                                    }
+
+                                    groups[index].items.push(item);
+
+                                    return groups;
+                                }, []);
+
+                                var chartConfiguration = {
+                                    type: 'bar',
+                                    data: {
+                                        labels: workItemTypes.map(workItemType => workItemType.key),
+                                        datasets: [ 
+                                            { 
+                                                label: 'Count of work items',
+                                                data: workItemTypes.map(workItemType => workItemType.items.length) 
+                                            } 
+                                        ]
+                                    },
+                                    options: { 
+                                        responsive: true,
+                                        maintainAspectRatio: false,
+                                        aspectRatio: 3
+                                    }
+                                };
+
+                                var chartArea = document.getElementById('chart');
+                                var chart = new Chart(chartArea, chartConfiguration);
+
+                                console.log(workItemTypes);
+                            });
+                        });
+
+                        return WidgetHelpers.WidgetStatusHelper.Success();
+                    }
+                }
+            });
+
+            VSS.notifyLoadSucceeded();
+        });
+    </script>
+</head>
+<body>
+    <div class="widget">
+        <div class="title-area">
+            <div class="title">
+                <div class="inner-title" id="title">Title</div>
+                <div class="subtitle" id="sub-title">Subtitle</div>
+            </div>
+        </div>
+        <div class="content" style="float: left; width: 100%; height: calc(100% - 40px);">
+            <canvas id="chart"></canvas>
+        </div>
+    </div>
+</body>
+</html>
